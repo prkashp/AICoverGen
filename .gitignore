@@ -19,6 +19,27 @@ output.mp3
 *.wav
 rvc_models/*/*.json
 
+# Mac M3 compatibility files are kept in version control
+# These files should NOT be ignored as they're part of the project
+
+# Temporary audio files
+*.mp3
+*.wav
+*.flac
+*.aac
+*.m4a
+
+# IDE and editor files
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -137,6 +158,7 @@ celerybeat.pid
 .venv
 env/
 venv/
+venv_mac_m3/
 ENV/
 env.bak/
 venv.bak/

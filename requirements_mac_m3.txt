@@ -1,0 +1,34 @@
+# Mac M3 Compatible Requirements for AICoverGen
+# Use this file instead of requirements.txt on Mac M3 systems
+
+# Core ML/Audio processing
+torch==2.0.1
+torchaudio==2.0.2
+numpy==1.23.5
+scipy==1.11.1
+librosa==0.9.1
+soundfile==0.12.1
+
+# RVC and AI dependencies
+fairseq==0.12.2
+faiss-cpu==1.7.3
+onnxruntime==1.15.1
+torchcrepe==0.0.20
+
+# Audio processing
+ffmpeg-python>=0.2.0
+pydub==0.25.1
+pedalboard==0.7.7
+pyworld==0.3.4
+praat-parselmouth>=0.4.2
+sox==1.4.1
+
+# Web UI and utilities
+gradio==3.39.0
+tqdm==4.65.0
+Requests==2.31.0
+yt_dlp==2023.7.6
+
+# Skip problematic packages for now
+# deemix - can cause installation issues
+# lib==4.0.0 - often problematic on Mac

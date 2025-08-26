@@ -65,6 +65,7 @@ class Config:
         elif torch.backends.mps.is_available():
             print("No supported N-card found, use MPS for inference")
             self.device = "mps"
+            self.is_half = False  # MPS doesn't support half precision
         else:
             print("No supported N-card found, use CPU for inference")
             self.device = "cpu"
