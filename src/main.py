@@ -8,11 +8,15 @@ import subprocess
 from contextlib import suppress
 from urllib.parse import urlparse, parse_qs
 
+# Enable MPS fallback for unsupported operations on Mac M3
+os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+
 import gradio as gr
 import librosa
 import numpy as np
 import soundfile as sf
 import sox
+import torch
 import yt_dlp
 from pedalboard import Pedalboard, Reverb, Compressor, HighpassFilter
 from pedalboard.io import AudioFile
@@ -123,26 +127,49 @@ def get_audio_paths(song_dir):
 
 
 def convert_to_stereo(audio_path):
-    wave, sr = librosa.load(audio_path, mono=False, sr=44100)
-
-    # check if mono
-    if type(wave[0]) != np.ndarray:
-        stereo_path = f'{os.path.splitext(audio_path)[0]}_stereo.wav'
-        command = shlex.split(f'ffmpeg -y -loglevel error -i "{audio_path}" -ac 2 -f wav "{stereo_path}"')
-        subprocess.run(command)
+    try:
+        # First try to load with librosa
+        wave, sr = librosa.load(audio_path, mono=False, sr=44100)
+        
+        # check if mono
+        if type(wave[0]) != np.ndarray:
+            stereo_path = f'{os.path.splitext(audio_path)[0]}_stereo.wav'
+            command = shlex.split(f'ffmpeg -y -loglevel error -i "{audio_path}" -ac 2 -f wav "{stereo_path}"')
+            subprocess.run(command)
+            return stereo_path
+        else:
+            return audio_path
+    except Exception as e:
+        # If librosa fails, use ffmpeg to convert to a compatible format first
+        print(f"Audio loading failed with librosa: {e}")
+        print("Converting audio format using ffmpeg...")
+        stereo_path = f'{os.path.splitext(audio_path)[0]}_converted.wav'
+        command = shlex.split(f'ffmpeg -y -loglevel error -i "{audio_path}" -ac 2 -ar 44100 -f wav "{stereo_path}"')
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise Exception(f"FFmpeg conversion failed: {result.stderr}")
         return stereo_path
-    else:
-        return audio_path
 
 
 def pitch_shift(audio_path, pitch_change):
     output_path = f'{os.path.splitext(audio_path)[0]}_p{pitch_change}.wav'
     if not os.path.exists(output_path):
-        y, sr = sf.read(audio_path)
-        tfm = sox.Transformer()
-        tfm.pitch(pitch_change)
-        y_shifted = tfm.build_array(input_array=y, sample_rate_in=sr)
-        sf.write(output_path, y_shifted, sr)
+        try:
+            y, sr = sf.read(audio_path)
+            tfm = sox.Transformer()
+            tfm.pitch(pitch_change)
+            y_shifted = tfm.build_array(input_array=y, sample_rate_in=sr)
+            sf.write(output_path, y_shifted, sr)
+        except Exception as e:
+            # Fallback to ffmpeg for pitch shifting if sox fails
+            print(f"SoX pitch shift failed: {e}")
+            print("Using ffmpeg for pitch shifting...")
+            # Convert semitones to ffmpeg pitch ratio
+            pitch_ratio = 2 ** (pitch_change / 12.0)
+            command = shlex.split(f'ffmpeg -y -loglevel error -i "{audio_path}" -af "asetrate=44100*{pitch_ratio},aresample=44100" "{output_path}"')
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise Exception(f"FFmpeg pitch shift failed: {result.stderr}")
 
     return output_path
 
@@ -192,16 +219,13 @@ def preprocess_song(song_input, mdx_model_params, song_id, is_webui, input_type,
 
 def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method, index_rate, filter_radius, rms_mix_rate, protect, crepe_hop_length, is_webui):
     rvc_model_path, rvc_index_path = get_rvc_model(voice_model, is_webui)
-    # Auto-detect device: MPS for Mac M1/M2/M3, CUDA for NVIDIA GPU, CPU as fallback
-    if torch.backends.mps.is_available():
-        device = 'mps'
-        is_half = False  # MPS doesn't support half precision
-    elif torch.cuda.is_available():
+    # Auto-detect device: Force CPU for Mac M3 due to FFT limitations, CUDA for NVIDIA GPU
+    if torch.cuda.is_available():
         device = 'cuda:0'
         is_half = True
     else:
         device = 'cpu'
-        is_half = False
+        is_half = False  # Force CPU due to MPS FFT limitations
     config = Config(device, is_half)
     hubert_model = load_hubert(device, config.is_half, os.path.join(rvc_models_dir, 'hubert_base.pt'))
     cpt, version, net_g, tgt_sr, vc = get_vc(device, config.is_half, config, rvc_model_path)

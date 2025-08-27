@@ -63,9 +63,9 @@ class Config:
                 with open(BASE_DIR / "src" / "trainset_preprocess_pipeline_print.py", "w") as f:
                     f.write(strr)
         elif torch.backends.mps.is_available():
-            print("No supported N-card found, use MPS for inference")
-            self.device = "mps"
-            self.is_half = False  # MPS doesn't support half precision
+            print("No supported N-card found, use CPU for inference (MPS has FFT limitations)")
+            self.device = "cpu"
+            self.is_half = False  # Force CPU due to MPS FFT limitations
         else:
             print("No supported N-card found, use CPU for inference")
             self.device = "cpu"

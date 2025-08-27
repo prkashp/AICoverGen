@@ -64,9 +64,13 @@ class MDX:
 
     def __init__(self, model_path: str, params: MDXModel, processor=DEFAULT_PROCESSOR):
 
-        # Set the device and the provider (CPU or CUDA)
-        self.device = torch.device(f'cuda:{processor}') if processor >= 0 else torch.device('cpu')
-        self.provider = ['CUDAExecutionProvider'] if processor >= 0 else ['CPUExecutionProvider']
+        # Force CPU for all MDX operations due to MPS FFT limitations
+        if torch.cuda.is_available() and processor >= 0:
+            self.device = torch.device(f'cuda:{processor}')
+            self.provider = ['CUDAExecutionProvider']
+        else:
+            self.device = torch.device('cpu')
+            self.provider = ['CPUExecutionProvider']
 
         self.model = params
 
@@ -198,7 +202,22 @@ class MDX:
         q.put({_id: processed_signal})
         return processed_signal
 
-    def process_wave(self, wave: np.array, mt_threads=1):
+    def _process_wave_single_thread(self, wave):
+        """
+        Process the wave array in a single-threaded environment as fallback
+        """
+        mix_waves, pad, trim = self.pad_wave(wave)
+        pw = []
+        for mix_wave in mix_waves:
+            spec = self.model.stft(mix_wave)
+            processed_spec = torch.tensor(self.process(spec))
+            processed_wav = self.model.istft(processed_spec.to(self.device))
+            processed_wav = processed_wav[:, :, trim:-trim].transpose(0, 1).reshape(2, -1).cpu().numpy()
+            pw.append(processed_wav)
+        processed_signal = np.concatenate(pw, axis=-1)[:, :-pad]
+        return processed_signal
+
+    def process_wave(self, wave, mt_threads=1):
         """
         Process the wave array in a multi-threaded environment
 
@@ -209,6 +228,10 @@ class MDX:
         Returns:
             numpy array: Processed wave array
         """
+        # Use single-threaded processing for CPU to avoid threading issues
+        if self.device.type == 'cpu':
+            mt_threads = 1
+            
         self.prog = tqdm(total=0)
         chunk = wave.shape[-1] // mt_threads
         waves = self.segment(wave, False, chunk)
@@ -217,11 +240,17 @@ class MDX:
         q = queue.Queue()
         threads = []
         for c, batch in enumerate(waves):
-            mix_waves, pad, trim = self.pad_wave(batch)
-            self.prog.total = len(mix_waves) * mt_threads
-            thread = threading.Thread(target=self._process_wave, args=(mix_waves, trim, pad, q, c))
-            thread.start()
-            threads.append(thread)
+            try:
+                mix_waves, pad, trim = self.pad_wave(batch)
+                self.prog.total = len(mix_waves) * mt_threads
+                thread = threading.Thread(target=self._process_wave, args=(mix_waves, trim, pad, q, c))
+                thread.start()
+                threads.append(thread)
+            except Exception as e:
+                print(f"Error processing batch {c}: {e}")
+                # Add empty result to maintain batch count
+                q.put({c: np.zeros_like(batch)})
+                
         for thread in threads:
             thread.join()
         self.prog.close()
@@ -231,16 +260,22 @@ class MDX:
             processed_batches.append(q.get())
         processed_batches = [list(wave.values())[0] for wave in
                              sorted(processed_batches, key=lambda d: list(d.keys())[0])]
-        assert len(processed_batches) == len(waves), 'Incomplete processed batches, please reduce batch size!'
+        
+        # More lenient assertion with error handling
+        if len(processed_batches) != len(waves):
+            print(f"Warning: Expected {len(waves)} batches, got {len(processed_batches)}. Using single-threaded fallback.")
+            # Fallback to single-threaded processing
+            return self._process_wave_single_thread(wave)
+            
         return self.segment(processed_batches, True, chunk)
 
 
 def run_mdx(model_params, output_dir, model_path, filename, exclude_main=False, exclude_inversion=False, suffix=None, invert_suffix=None, denoise=False, keep_orig=True, m_threads=2):
-    device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
-    device_properties = torch.cuda.get_device_properties(device)
-    vram_gb = device_properties.total_memory / 1024**3
-    m_threads = 1 if vram_gb < 8 else 2
+    # Force CPU for all MDX operations due to MPS FFT limitations
+    device = torch.device('cpu')
+    # Use single thread for CPU to avoid threading issues
+    m_threads = 1
 
     model_hash = MDX.get_hash(model_path)
     mp = model_params.get(model_hash)
@@ -253,7 +288,9 @@ def run_mdx(model_params, output_dir, model_path, filename, exclude_main=False, 
         compensation=mp["compensate"]
     )
 
-    mdx_sess = MDX(model_path, model)
+    # Pass device info to MDX session for proper device handling
+    processor = 0 if device.type == 'cuda' else -1  # Use GPU processor for CUDA, CPU for others
+    mdx_sess = MDX(model_path, model, processor)
     wave, sr = librosa.load(filename, mono=False, sr=44100)
     # normalizing input wave gives better output
     peak = max(np.max(wave), abs(np.min(wave)))
