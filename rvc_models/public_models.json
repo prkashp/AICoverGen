@@ -10,13 +10,13 @@
     },
     "voice_models": [
         {
-            "name": "Emilia",
-            "url": "https://huggingface.co/RinkaEmina/RVC_Sharing/resolve/main/Emilia%20V2%2048000.zip",
-            "description": "Emilia from Re:Zero",
+            "name": "Arijit",
+            "url": "https://huggingface.co/QuickWick/Music-AI-Voices/resolve/main/Arijit%20Singh%20(RVC)%20(Crepe%20v2)%20450%20Epoch/Arijit%20Singh%20(RVC)%20(Crepe%20v2)%20450%20Epoch.zip",
+            "description": "Arijit from QuickWick",
             "added": "2023-07-31",
             "credit": "rinka4759",
             "tags": [
-                "Anime"
+                "Bollywood"
             ]
         },
         {
