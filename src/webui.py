@@ -4,6 +4,14 @@ import shutil
 import urllib.request
 import zipfile
 from argparse import ArgumentParser
+import warnings
+
+# Suppress MPS fallback warnings in WebUI
+warnings.filterwarnings("ignore", message=".*MPS.*")
+warnings.filterwarnings("ignore", message=".*fallback.*")
+warnings.filterwarnings("ignore", message=".*aten::_fft_r2c.*")
+warnings.filterwarnings("ignore", message=".*not currently implemented.*")
+warnings.filterwarnings("ignore", category=UserWarning)
 
 import gradio as gr
 
@@ -154,14 +162,12 @@ def show_hop_slider(pitch_detection_algo):
         return gr.update(visible=False)
 
 
-if __name__ == '__main__':
-    parser = ArgumentParser(description='Generate a AI cover song in the song_output/id directory.', add_help=True)
-    parser.add_argument("--share", action="store_true", dest="share_enabled", default=False, help="Enable sharing")
-    parser.add_argument("--listen", action="store_true", default=False, help="Make the WebUI reachable from your local network.")
-    parser.add_argument('--listen-host', type=str, help='The hostname that the server will use.')
-    parser.add_argument('--listen-port', type=int, help='The listening port that the server will use.')
-    args = parser.parse_args()
+voice_models = []
+public_models = {}
 
+
+def build_app():
+    global voice_models, public_models
     voice_models = get_current_models(rvc_models_dir)
     with open(os.path.join(rvc_models_dir, 'public_models.json'), encoding='utf8') as infile:
         public_models = json.load(infile)
@@ -298,7 +304,7 @@ if __name__ == '__main__':
         # Upload tab
         with gr.Tab('Upload model'):
             gr.Markdown('## Upload locally trained RVC v2 model and index file')
-            gr.Markdown('- Find model file (weights folder) and optional index file (logs/[name] folder)')
+            gr.Markdown('- Find model file (weights folders) and optional index file (logs/[name] folder)')
             gr.Markdown('- Compress files into zip file')
             gr.Markdown('- Upload zip file and give unique name for voice')
             gr.Markdown('- Click Upload model')
@@ -314,6 +320,18 @@ if __name__ == '__main__':
                 local_upload_output_message = gr.Text(label='Output Message', interactive=False, scale=20)
                 model_upload_button.click(upload_local_model, inputs=[zip_file, local_model_name], outputs=local_upload_output_message)
 
+    return app
+
+
+if __name__ == '__main__':
+    parser = ArgumentParser(description='Generate a AI cover song in the song_output/id directory.', add_help=True)
+    parser.add_argument("--share", action="store_true", dest="share_enabled", default=False, help="Enable sharing")
+    parser.add_argument("--listen", action="store_true", default=False, help="Make the WebUI reachable from your local network.")
+    parser.add_argument('--listen-host', type=str, help='The hostname that the server will use.')
+    parser.add_argument('--listen-port', type=int, help='The listening port that the server will use.')
+    args = parser.parse_args()
+
+    app = build_app()
     app.launch(
         share=args.share_enabled,
         enable_queue=True,
